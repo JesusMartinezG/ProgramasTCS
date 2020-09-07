@@ -1,4 +1,4 @@
-PROYECTO=tdf
+PROYECTO=dtmf
 CFLAGS=-Wall -g3
 LDFLAGS=-lm
 CC=gcc

@@ -291,20 +291,90 @@ void cerrarWAV ( WAV ** datos )
     free(*datos);
 }
 
+void swap (double * datos, int n1, int n2)
+{
+    double aux = datos[n1];
+    datos[n1] = datos[n2];
+    datos[n2] = aux;
+}
+
 // Guarda la fft dentro de la misma estructura
 // Solo considera archivos WAV monoaurales
 // Guarda los resultados en un arreglo de 32 bits
 
-WAV * DFT( WAV wav ) // wav solo para lectura
+WAV * FFT( WAV wav ) // wav solo para lectura
 {
     if (wav.numChannels != 1) // Si el archivo no es monoaural no hagas nada
         return NULL;
-    
-    double pi2 = 2.0 * PI;
-    double ang, cosA, senA;
-    double invs = 1.0 / wav.dataArraySize; // 1/N
-    double auxreal[wav.dataArraySize];
-    double auximag[wav.dataArraySize];
+
+    //Copia datos de archivo en un arreglo diferente
+    int64_t tamfft = pow(2.0, ceil(log2(wav.dataArraySize))); //Calcular base 2 más cercana
+    double * copia_datos = (double*)malloc(sizeof(double)*tamfft); // Reservar memoria
+    memset(copia_datos, 0.0, tamfft); //Llenar de 0s
+    for(int x=0; x<wav.dataArraySize; x++) copia_datos[x] = wav.data[x];// Copia valores del arreglo original
+
+    //double pi2 = 2.0 * PI;
+    //double ang, cosA, senA;
+    double invs = 1.0 / sqrt(tamfft); // 1/N
+    double auxreal[tamfft];
+    double auximag[tamfft];
+    int N=tamfft;
+    int mmax,i,j,k,j1,m,n;
+    float arg,s,c,w,tempr,tempi;
+
+    m=log2(N);
+
+    for(i=0; i<N; ++i) // Bit reversal
+    {
+        j=0;
+        for(k=0; k<m; ++k)
+            j= (j<<1) | (1 & (i>>k));
+        if(j<1)
+            swap(copia_datos,i,j);
+    }
+
+    for(i=0; i<m; i++)
+    {
+        n=pow(2.0,i);
+        w=PI/n;
+        
+        k=0;
+        while ( k<N-1 )
+        {
+            for(j=0; j<n; j++)
+            {
+                arg = -j*w;
+                c=cos(arg);
+                s=sin(arg);
+                j1=k+j;
+                tempr=copia_datos[j1+n]*c;
+                tempi=copia_datos[j1+n]*s;
+                auxreal[j1+n] = copia_datos[j1] - tempr;
+                auximag[j1+n] = -tempi;
+                auxreal[j1] = copia_datos[j1] + tempr;
+                auximag[j1] = copia_datos[j1] + tempi;
+            }
+            k+=2*n;
+        }
+    }
+    //arg=1.0/N;
+    //printf("FFT TERMINA!!!!! %li\n",tamfft);
+    /*
+    for(unsigned int y = 0;y < wav.dataArraySize; y++) //Para cada muestra en la estructura
+    {
+        for(unsigned int x = 0;x < wav.dataArraySize;x++)
+        {
+            ang = pi2 * y * x * invs;
+            cosA = cos(ang);
+            senA = sin(ang);
+            auxreal[y] += ((int16_t)wav.data[x]) * cosA; // No se calcula la parte imaginaria de la formula
+            auximag[y] += ((int16_t)wav.data[x]) * senA;
+        }
+        auxreal[y] *= invs;
+        auximag[y] *= invs;
+        out->data[(y*2)] = auxreal[y];
+        out->data[(y*2)+1] = auximag[y];
+    }*/
 
     WAV * out = (WAV*)malloc(sizeof(WAV));
     out->numChannels = 2;// 2 canales
@@ -320,29 +390,26 @@ WAV * DFT( WAV wav ) // wav solo para lectura
     //Calcula el tamaño de los chunks y otros valores
     out->byteRate = out->sampleRate * out->numChannels * (out->bytesperSample);
     out->blockAlign = out->numChannels * out->bytesperSample;
-    out->dataArraySize = wav.dataArraySize * out->numChannels; // Doble de muestras en la salida por ser un archivo stereo
+    out->dataArraySize = tamfft * out->numChannels; // Doble de muestras en la salida por ser un archivo stereo
     out->subchunk1Size = wav.subchunk1Size; // igual porque sigue siendo pcm
     out->subchunk2Size = out->dataArraySize * out->numChannels;
     out->chunkSize = 36 + out->subchunk2Size;
 
+    //printf("%i\n",out->dataArraySize);
+
     //Reserva memoria para el arreglo de datos
     out->data = (int32_t*)malloc(sizeof(int32_t)*out->dataArraySize);
 
-    for(unsigned int y = 0;y < wav.dataArraySize; y++) //Para cada muestra en la estructura
+    for(i=0;i<N; i++)
     {
-        for(unsigned int x = 0;x < wav.dataArraySize;x++)
-        {
-            ang = pi2 * y * x * invs;
-            cosA = cos(ang);
-            senA = sin(ang);
-            auxreal[y] += ((int16_t)wav.data[x]) * cosA; // No se calcula la parte imaginaria de la formula
-            auximag[y] += ((int16_t)wav.data[x]) * senA;
-        }
-        auxreal[y] *= invs;
-        auximag[y] *= invs;
-        out->data[(y*2)] = auxreal[y];
-        out->data[(y*2)+1] = auximag[y];
+        auxreal[i] *= invs;
+        auximag[i] *= invs;
+        out->data[(i*2)] = auxreal[i];
+        out->data[(i*2)+1] = auximag[i];
+        //printf("%f i%f - %i i%i\n",auxreal[i],auximag[i],out->data[(i*2)],out->data[(i*2)+1]);
     }
+
+    free(copia_datos);
 
     return out;
 }
@@ -362,7 +429,7 @@ int main( int argc, char *argv[] )
     printf("Información del archivo de entrada\n");
     showWAVinfo(entrada);
 
-    WAV * salida = DFT(*entrada);
+    WAV * salida = FFT(*entrada);
     printf("\n\nInformación del archivo de salida\n");
     showWAVinfo(salida);
     writeWAV(salida,arg2);

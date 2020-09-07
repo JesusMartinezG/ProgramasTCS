@@ -1,5 +1,5 @@
-PROYECTO=tdf
-CFLAGS=-Wall -g3
+PROYECTO=convolucion
+CFLAGS= -g3
 LDFLAGS=-lm
 CC=gcc
 OBJS = $(patsubst %.c,%.o,$(wildcard *.c))

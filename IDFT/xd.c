@@ -36,11 +36,7 @@ int32_t buffer_to_sint ( uint8_t buffer[], uint8_t numBytes);
 void uint_to_buffer ( uint32_t integer, uint8_t buffer[], uint8_t numBytes);
 int writeWAV ( WAV * datos ,char * filename);
 WAV * abrirWAV ( char * filename );
-void showWAVinfo(WAV * info);
 void cerrarWAV ( WAV ** datos );
-
-WAV * DFT( WAV wav );
-
 
 uint32_t buffer_to_uint ( uint8_t buffer[], uint8_t numBytes) //Recibe un arreglo de bytes little endian, toma numBytes elementos del arreglo y los convierte en un entero de 32 bits
 {
@@ -88,7 +84,7 @@ int32_t buffer_to_sint ( uint8_t buffer[], uint8_t numBytes) //Recibe un arreglo
     return integer;
 }
 
-uint32_t buffer_to_uint32 ( uint8_t buffer[]) //Recibe un arreglo de bytes little endian, toma numBytes elementos del arreglo y los convierte en un entero de 32 bits
+uint32_t buffer_to_uint32 ( uint8_t buffer[] ) //Recibe un arreglo de bytes little endian, toma numBytes elementos del arreglo y los convierte en un entero de 32 bits
 {
     uint32_t integer = buffer[0];
     integer += buffer[1]<<8;
@@ -102,13 +98,15 @@ int writeWAV ( WAV * datos ,char * filename)
 {
     if (datos == NULL)
     {
-        return -1;
+        printf("Entrada no valida\n");
+        exit(0);
     }
 
     FILE * archivo = fopen( filename, "wb" );
 
     if (archivo == NULL)
     {
+        printf("No se pudo crear\n");
         return -2;
     }
     uint8_t buffer[4];
@@ -183,7 +181,7 @@ WAV * abrirWAV ( char * filename ) //
     }
 
     WAV * datos = (WAV*) malloc(sizeof(WAV)); // Reserva memoria para el contenendor WAV
-    uint8_t buffer[4]; // Buffer auxiliar para la converión a bytes
+    uint8_t buffer[4];
 
     
     //4 bytes chunkID Big endian
@@ -199,6 +197,7 @@ WAV * abrirWAV ( char * filename ) //
     //Verifica si el archivo es de formato wav
     if( !(datos->format[0] == 'W' && datos->format[1] == 'A' && datos->format[2] == 'V' && datos->format[3] == 'E') )
     {
+        printf("El archivo no es WAV");
         free( datos );
         fclose(archivo);
         return NULL;
@@ -244,45 +243,24 @@ WAV * abrirWAV ( char * filename ) //
 
     //datos
     datos->bytesperSample = datos->bitsPerSample / 8;
+    //datos->dataArraySize = datos->subchunk2Size / datos->bytesperSample;
     datos->dataArraySize = datos->subchunk2Size / datos->bytesperSample;
-    //datos->dataArraySize = datos->subchunk2Size / (datos->numChannels * datos->bytesperSample);
 
     datos->data = (int32_t*)malloc( sizeof(int32_t)*datos->dataArraySize );
     uint32_t j=0, k=0;
 
-    for( int i=1; i<=datos->subchunk2Size; i++ )
-    {
-        buffer[j++] = getc( archivo );
-        if( j == datos->bytesperSample ) // Si el byte actual es multiplo del numero de bytes por muestra
+        for( int i=1; i<=datos->subchunk2Size; i++ )
         {
-            datos->data[k++] = buffer_to_sint( buffer, datos->bytesperSample); //Convierte las muestras en el buffer
-            //printf("%i\n", (int16_t)datos->data[k-1]);
-            j=0; // Vuelve a escribir desde el inicio del buffer
+            buffer[j++] = getc( archivo );
+            if( j == datos->bytesperSample ) // Si el byte actual es multiplo del numero de bytes por muestra
+            {
+                datos->data[k++] = buffer_to_sint( buffer, datos->bytesperSample); //Convierte las muestras en el buffer
+                //printf("%i\n", (int16_t)datos->data[k-1]);
+                j=0; // Vuelve a escribir desde el inicio del buffer
+            }
         }
-    }
     fclose(archivo);
     return datos;
-}
-
-void showWAVinfo(WAV * info)
-{
-    printf("ChunkID: %c%c%c%c\n",info->chunkID[0],info->chunkID[1],info->chunkID[2],info->chunkID[3]);
-    printf("ChunkSize: %u\n",info->chunkSize);
-    printf("format: %c%c%c%c\n",info->format[0],info->format[1],info->format[2],info->format[3]);
-    printf("subChunk1ID: %c%c%c%c\n",info->subchunk1ID[0],info->subchunk1ID[1],info->subchunk1ID[2],info->subchunk1ID[3]);
-    printf("subChunk1Size: %u\n",info->subchunk1Size);
-    printf("AudioFormat: %u\n",info->audioFormat);
-    printf("NumChannels: %u\n",info->numChannels);
-    printf("SampleRate: %u\n",info->sampleRate);
-    printf("ByteRate: %u\n",info->byteRate);
-    printf("BlockAlign: %u\n",info->blockAlign);
-    printf("BitsPerSample: %u\n",info->bitsPerSample);
-    printf("SubChunk2ID: %c%c%c%c\n",info->subchunk2ID[0],info->subchunk2ID[1],info->subchunk2ID[2],info->subchunk2ID[3]);
-    printf("subChunk2Size: %u\n",info->subchunk2Size);
-    printf("BytesPerSample: %u\n",info->bytesperSample);
-    printf("ArraySize: %u\n",info->dataArraySize);
-
-    //for(int i=0; i<info->dataArraySize; i+=10) printf("%i\n",info->data16[i]);
 }
 
 void cerrarWAV ( WAV ** datos )
@@ -291,57 +269,66 @@ void cerrarWAV ( WAV ** datos )
     free(*datos);
 }
 
-// Guarda la fft dentro de la misma estructura
-// Solo considera archivos WAV monoaurales
-// Guarda los resultados en un arreglo de 32 bits
+// Lee un archivo wav stereo
+// El canal 1 representa la parte real y el canal 2 la parte imaginaria
+// Guarda los resultados en un archivo mono
 
-WAV * DFT( WAV wav ) // wav solo para lectura
+WAV * IDFT( WAV wav ) // wav solo para lectura
 {
-    if (wav.numChannels != 1) // Si el archivo no es monoaural no hagas nada
+    if (wav.numChannels != 2) // Si el archivo no es stereo no hagas nada
+    {
+        printf("El archivo no es stereo\n");
         return NULL;
+    }
     
     double pi2 = 2.0 * PI;
     double ang, cosA, senA;
-    double invs = 1.0 / wav.dataArraySize; // 1/N
-    double auxreal[wav.dataArraySize];
-    double auximag[wav.dataArraySize];
+    double invs = 1.0 / (wav.dataArraySize / 2); // 1/N
+    double aux = 0.0;
 
     WAV * out = (WAV*)malloc(sizeof(WAV));
-    out->numChannels = 2;// 2 canales
+    out->numChannels = 1;// 1 canal pues la salida es un numero real
     out->bitsPerSample = wav.bitsPerSample; // Misma presicion que la entrada
     out->bytesperSample = out->bitsPerSample / 8;
     out->audioFormat = wav.audioFormat; // PCM
     out->sampleRate = wav.sampleRate; // 44100
-    memcpy(out->chunkID,wav.chunkID, sizeof(wav.chunkID[0])*4); // Copia los valores del arrelo original
+    memcpy(out->chunkID,wav.chunkID, sizeof(wav.chunkID[0])*4); // Copia los valores del arreglo original
     memcpy(out->format,wav.format, sizeof(wav.format[0])*4);
     memcpy(out->subchunk1ID,wav.subchunk1ID, sizeof(wav.subchunk1ID[0])*4);
     memcpy(out->subchunk2ID,wav.subchunk2ID, sizeof(wav.subchunk2ID[0])*4);
 
-    //Calcula el tamaño de los chunks y otros valores
     out->byteRate = out->sampleRate * out->numChannels * (out->bytesperSample);
     out->blockAlign = out->numChannels * out->bytesperSample;
-    out->dataArraySize = wav.dataArraySize * out->numChannels; // Doble de muestras en la salida por ser un archivo stereo
+    out->dataArraySize = wav.dataArraySize / 2; // La mitad de muestras en la salida por ser un archivo mono
     out->subchunk1Size = wav.subchunk1Size; // igual porque sigue siendo pcm
-    out->subchunk2Size = out->dataArraySize * out->numChannels;
-    out->chunkSize = 36 + out->subchunk2Size;
+    out->subchunk2Size = out->dataArraySize * out->bytesperSample;
+    out->chunkSize = 4 + (8 + out->subchunk1Size) + (8 + out->subchunk2Size);
 
     //Reserva memoria para el arreglo de datos
     out->data = (int32_t*)malloc(sizeof(int32_t)*out->dataArraySize);
 
-    for(unsigned int y = 0;y < wav.dataArraySize; y++) //Para cada muestra en la estructura
+    for(int y=0; y < out->dataArraySize; y++) // Para cada muestra de la salida
     {
-        for(unsigned int x = 0;x < wav.dataArraySize;x++)
+        aux = 0.0;
+        for(int x=0; x < out->dataArraySize; x++) // Usa cada muestra de la entrada
         {
             ang = pi2 * y * x * invs;
             cosA = cos(ang);
             senA = sin(ang);
-            auxreal[y] += ((int16_t)wav.data[x]) * cosA; // No se calcula la parte imaginaria de la formula
-            auximag[y] += ((int16_t)wav.data[x]) * senA;
+            aux += ((int16_t)wav.data[(x*2)]) * cosA - ((int16_t)wav.data[(x*2)+1]) * senA;
         }
-        auxreal[y] *= invs;
-        auximag[y] *= invs;
-        out->data[(y*2)] = auxreal[y];
-        out->data[(y*2)+1] = auximag[y];
+        if(aux < INT16_MIN)
+        {
+            out->data[out->dataArraySize-y] = INT16_MAX;
+        }
+        else if (aux > INT16_MAX)
+        {
+            out->data[out->dataArraySize-y] = INT16_MIN;
+        }
+        else
+        {
+            out->data[out->dataArraySize-y] = -aux;
+        }
     }
 
     return out;
@@ -351,7 +338,7 @@ int main( int argc, char *argv[] )
 {
     if( argc != 3 )
     {
-        printf("Error en los argumento de ejecucion\n%s <archivo de entrada> <archivo de salida>\n",argv[0]);
+        printf("Error en los argumentos de ejecucion\n%s <archivo de entrada> <archivo de salida>\n",argv[0]);
         exit(0);
     }
 
@@ -359,12 +346,7 @@ int main( int argc, char *argv[] )
     char * arg2 = argv[2];
 
     WAV * entrada = abrirWAV(arg1);
-    printf("Información del archivo de entrada\n");
-    showWAVinfo(entrada);
-
-    WAV * salida = DFT(*entrada);
-    printf("\n\nInformación del archivo de salida\n");
-    showWAVinfo(salida);
+    WAV * salida = IDFT(*entrada);
     writeWAV(salida,arg2);
 
     cerrarWAV(&entrada);
